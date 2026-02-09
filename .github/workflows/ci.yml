@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Prepare Clojure Tools
+        uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: 1.12.1.1550
+          bb: 1.12.202
+          clj-kondo: 2025.06.05
+
+      - name: Cache Clojure Dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            .cpcache
+          key: clojure-deps-${{ hashFiles('deps.edn') }}
+          restore-keys: clojure-deps-
+
+      - name: Lint
+        run: bb lint
+
+      - name: Test
+        run: bb test
