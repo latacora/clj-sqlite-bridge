@@ -46,6 +46,10 @@ Add a REGEXP helper:
 - `com.latacora.sqlite.regexp/regexp-matches?` implements a SQLite-compatible regexp predicate.
 - `com.latacora.sqlite.regexp/add-regexp!` registers the `regexp` UDF.
 - `com.latacora.sqlite.regexp/with-regexp` registers the `regexp` UDF for a body.
+- `com.latacora.sqlite.strings/casefold` locale-independent lowercasing.
+- `com.latacora.sqlite.strings/normalize-nfc` Unicode NFC normalization.
+- `com.latacora.sqlite.strings/with-casefold` registers the `casefold` UDF.
+- `com.latacora.sqlite.strings/with-normalize-nfc` registers the `normalize_nfc` UDF.
 
 ## Development
 
