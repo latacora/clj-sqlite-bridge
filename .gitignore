@@ -1,5 +1,5 @@
 /.cpcache
 /.clj-kondo/.cache
-/\.portal
+/.portal
 /target
 .DS_Store
