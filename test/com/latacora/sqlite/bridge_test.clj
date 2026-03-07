@@ -66,3 +66,122 @@
      (fn [conn]
        (bridge/with-func {:conn conn :func-name "echo" :func identity}
          (= s (query-single conn "SELECT echo(?);" #(.setString % 1 s))))))))
+
+;; Helpers for listener tests
+
+(defn ^:private exec!
+  [^Connection conn sql]
+  (with-open [stmt (.createStatement conn)]
+    (.execute stmt sql)))
+
+(defn ^:private create-test-table!
+  [conn]
+  (exec! conn "CREATE TABLE t (id INTEGER PRIMARY KEY, val TEXT)"))
+
+;; Update listener tests
+
+(deftest update-listener-fires-on-mutations
+  (with-conn
+   (fn [conn]
+     (create-test-table! conn)
+     (let [events (atom [])]
+       (bridge/with-update-listener
+        {:conn conn :listener-fn (fn [type db table row-id]
+                                   (swap! events conj [type db table row-id]))}
+        (exec! conn "INSERT INTO t (val) VALUES ('a')")
+        (exec! conn "UPDATE t SET val = 'b' WHERE id = 1")
+        (exec! conn "DELETE FROM t WHERE id = 1"))
+       (is (= [[:insert "main" "t" 1]
+               [:update "main" "t" 1]
+               [:delete "main" "t" 1]]
+              @events))))))
+
+(deftest update-listener-removal-stops-notifications
+  (with-conn
+   (fn [conn]
+     (create-test-table! conn)
+     (let [events (atom [])
+           f (fn [type db table row-id]
+               (swap! events conj [type db table row-id]))]
+       (bridge/add-update-listener! conn f)
+       (exec! conn "INSERT INTO t (val) VALUES ('a')")
+       (bridge/remove-update-listener! conn f)
+       (exec! conn "INSERT INTO t (val) VALUES ('b')")
+       (is (= [[:insert "main" "t" 1]] @events))))))
+
+(deftest update-listener-deregister-fn
+  (with-conn
+   (fn [conn]
+     (create-test-table! conn)
+     (let [events (atom [])
+           deregister (bridge/add-update-listener!
+                       conn
+                       (fn [type db table row-id]
+                         (swap! events conj [type db table row-id])))]
+       (exec! conn "INSERT INTO t (val) VALUES ('a')")
+       (is (some? (:listener (meta deregister))))
+       (deregister)
+       (exec! conn "INSERT INTO t (val) VALUES ('b')")
+       (is (= [[:insert "main" "t" 1]] @events))))))
+
+;; Commit listener tests
+
+(deftest commit-listener-fires-on-commit
+  (with-conn
+   (fn [conn]
+     (create-test-table! conn)
+     (let [commits (atom 0)]
+       (.setAutoCommit conn false)
+       (bridge/with-commit-listener
+        {:conn conn :listener-fn (fn [] (swap! commits inc))}
+        (exec! conn "INSERT INTO t (val) VALUES ('a')")
+        (.commit conn)
+        (exec! conn "INSERT INTO t (val) VALUES ('b')")
+        (.commit conn))
+       (is (= 2 @commits))))))
+
+(deftest commit-listener-removal-via-remove-fn
+  (with-conn
+   (fn [conn]
+     (create-test-table! conn)
+     (let [commits (atom 0)
+           f (fn [] (swap! commits inc))]
+       (.setAutoCommit conn false)
+       (bridge/add-commit-listener! conn f)
+       (exec! conn "INSERT INTO t (val) VALUES ('a')")
+       (.commit conn)
+       (bridge/remove-commit-listener! conn f)
+       (exec! conn "INSERT INTO t (val) VALUES ('b')")
+       (.commit conn)
+       (is (= 1 @commits))))))
+
+;; Rollback listener tests
+
+(deftest rollback-listener-fires-on-rollback
+  (with-conn
+   (fn [conn]
+     (create-test-table! conn)
+     (let [rollbacks (atom 0)]
+       (.setAutoCommit conn false)
+       (bridge/with-rollback-listener
+        {:conn conn :listener-fn (fn [] (swap! rollbacks inc))}
+        (exec! conn "INSERT INTO t (val) VALUES ('a')")
+        (.rollback conn)
+        (exec! conn "INSERT INTO t (val) VALUES ('b')")
+        (.rollback conn))
+       (is (= 2 @rollbacks))))))
+
+(deftest rollback-listener-removal-via-remove-fn
+  (with-conn
+   (fn [conn]
+     (create-test-table! conn)
+     (let [rollbacks (atom 0)
+           f (fn [] (swap! rollbacks inc))]
+       (.setAutoCommit conn false)
+       (bridge/add-rollback-listener! conn f)
+       (exec! conn "INSERT INTO t (val) VALUES ('a')")
+       (.rollback conn)
+       (bridge/remove-rollback-listener! conn f)
+       (exec! conn "INSERT INTO t (val) VALUES ('b')")
+       (.rollback conn)
+       (is (= 1 @rollbacks))))))

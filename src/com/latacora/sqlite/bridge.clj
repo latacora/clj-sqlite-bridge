@@ -1,8 +1,9 @@
 (ns com.latacora.sqlite.bridge
   "Helpers for embedding Clojure into SQLite, providing functionality to add custom
-  functions to SQLite."
+  functions and listeners to SQLite."
   (:import
-   (org.sqlite Function)
+   (org.sqlite Function SQLiteConnection SQLiteCommitListener SQLiteUpdateListener
+              SQLiteUpdateListener$Type)
    (org.sqlite.core Codes)
    (java.lang.reflect Method)
    (java.sql Connection)))
@@ -100,3 +101,144 @@
      ~@body
      (finally
        (remove-func! ~conn ~func-name))))
+
+;; Listener support
+
+(def ^:private update-type->kw
+  {SQLiteUpdateListener$Type/INSERT :insert
+   SQLiteUpdateListener$Type/UPDATE :update
+   SQLiteUpdateListener$Type/DELETE :delete})
+
+(def ^:private listener-cache
+  "Memoization cache: [conn clj-fn listener-type] -> Java listener object."
+  (atom {}))
+
+(defn ^:private ->sqlite-conn
+  ^SQLiteConnection [^Connection conn]
+  (.unwrap conn SQLiteConnection))
+
+(defn ^:private cached-listener
+  "Returns a cached Java listener for the given conn, fn, and type, creating it
+  if necessary."
+  [conn f listener-type make-listener]
+  (let [k [conn f listener-type]]
+    (or (get @listener-cache k)
+        (let [listener (make-listener f)]
+          (swap! listener-cache assoc k listener)
+          listener))))
+
+(defn ^:private uncache-listener
+  [conn f listener-type]
+  (let [k [conn f listener-type]]
+    (when-let [listener (get @listener-cache k)]
+      (swap! listener-cache dissoc k)
+      listener)))
+
+;; Update listeners
+
+(defn ^:private ->update-listener
+  [f]
+  (reify SQLiteUpdateListener
+    (onUpdate [_ type database table row-id]
+      (f (update-type->kw type) database table row-id))))
+
+(defn add-update-listener!
+  "Registers a function as a SQLite update listener. The function will be called
+  with (type database table row-id) where type is :insert, :update, or :delete.
+
+  Returns a zero-arg function that deregisters the listener. The underlying Java
+  listener object is available as :listener metadata on the returned function."
+  [^Connection conn f]
+  (let [sqlite-conn (->sqlite-conn conn)
+        listener (cached-listener conn f ::update ->update-listener)]
+    (.addUpdateListener sqlite-conn listener)
+    (with-meta
+      (fn [] (.removeUpdateListener sqlite-conn listener))
+      {:listener listener})))
+
+(defn remove-update-listener!
+  "Removes a previously registered update listener."
+  [^Connection conn f]
+  (when-let [listener (uncache-listener conn f ::update)]
+    (.removeUpdateListener (->sqlite-conn conn) listener)))
+
+(defmacro with-update-listener
+  "Executes body with an update listener registered for the duration."
+  [{:keys [conn listener-fn]} & body]
+  `(let [deregister# (add-update-listener! ~conn ~listener-fn)]
+     (try
+       ~@body
+       (finally
+         (deregister#)))))
+
+;; Commit listeners
+
+(defn ^:private ->commit-listener
+  [f]
+  (reify SQLiteCommitListener
+    (onCommit [_] (f))
+    (onRollback [_])))
+
+(defn add-commit-listener!
+  "Registers a zero-arg function as a SQLite commit listener.
+
+  Returns a zero-arg function that deregisters the listener. The underlying Java
+  listener object is available as :listener metadata on the returned function."
+  [^Connection conn f]
+  (let [sqlite-conn (->sqlite-conn conn)
+        listener (cached-listener conn f ::commit ->commit-listener)]
+    (.addCommitListener sqlite-conn listener)
+    (with-meta
+      (fn [] (.removeCommitListener sqlite-conn listener))
+      {:listener listener})))
+
+(defn remove-commit-listener!
+  "Removes a previously registered commit listener."
+  [^Connection conn f]
+  (when-let [listener (uncache-listener conn f ::commit)]
+    (.removeCommitListener (->sqlite-conn conn) listener)))
+
+(defmacro with-commit-listener
+  "Executes body with a commit listener registered for the duration."
+  [{:keys [conn listener-fn]} & body]
+  `(let [deregister# (add-commit-listener! ~conn ~listener-fn)]
+     (try
+       ~@body
+       (finally
+         (deregister#)))))
+
+;; Rollback listeners
+
+(defn ^:private ->rollback-listener
+  [f]
+  (reify SQLiteCommitListener
+    (onCommit [_])
+    (onRollback [_] (f))))
+
+(defn add-rollback-listener!
+  "Registers a zero-arg function as a SQLite rollback listener.
+
+  Returns a zero-arg function that deregisters the listener. The underlying Java
+  listener object is available as :listener metadata on the returned function."
+  [^Connection conn f]
+  (let [sqlite-conn (->sqlite-conn conn)
+        listener (cached-listener conn f ::rollback ->rollback-listener)]
+    (.addCommitListener sqlite-conn listener)
+    (with-meta
+      (fn [] (.removeCommitListener sqlite-conn listener))
+      {:listener listener})))
+
+(defn remove-rollback-listener!
+  "Removes a previously registered rollback listener."
+  [^Connection conn f]
+  (when-let [listener (uncache-listener conn f ::rollback)]
+    (.removeCommitListener (->sqlite-conn conn) listener)))
+
+(defmacro with-rollback-listener
+  "Executes body with a rollback listener registered for the duration."
+  [{:keys [conn listener-fn]} & body]
+  `(let [deregister# (add-rollback-listener! ~conn ~listener-fn)]
+     (try
+       ~@body
+       (finally
+         (deregister#)))))
