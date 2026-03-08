@@ -96,29 +96,30 @@
   ConcurrentHashMap keyed by the cloned instance itself (using default Object
   identity semantics)."
   [{:keys [step final init]}]
-  (let [states (volatile! {})
-        ensure-state! (fn [this]
-                        (when-not (contains? @states this)
-                          (vswap! states assoc this (init))))]
+  (let [states (atom {})
+        step-state! (fn [this args]
+                      (swap! states update this
+                             (fn [acc]
+                               (apply step (if (some? acc) acc (init)) args))))
+        final-state! (fn [this]
+                       (let [m @states]
+                         (final (get m this (init)))))]
     (proxy [Function$Aggregate] []
       (xStep []
         (try
-          (let [args (resolve-args! this)]
-            (ensure-state! this)
-            (vswap! states update this #(apply step % args)))
+          (step-state! this (resolve-args! this))
           (catch Exception e
             (let [error-method (get func-methods :error)]
               (Method/.invoke error-method this (object-array [(str e)]))))))
       (xFinal []
         (try
-          (ensure-state! this)
-          (let [result (final (get @states this))]
+          (let [result (final-state! this)]
             (return! this result))
           (catch Exception e
             (let [error-method (get func-methods :error)]
               (Method/.invoke error-method this (object-array [(str e)]))))
           (finally
-            (vswap! states dissoc this)))))))
+            (swap! states dissoc this)))))))
 
 (defn add-func!
   "Adds a Clojure function as a SQLite user-defined function."
