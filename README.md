@@ -31,8 +31,31 @@ values—including booleans, which become `1`/`0`.
 ```
 
 For long-lived connections, use `add-func!` and `remove-func!` directly instead of
-`with-func`. Under the hood, `->Function` wraps a Clojure function into the
-`org.sqlite.Function` interface if you need the object itself.
+`with-func`.
+
+### Aggregate UDFs
+
+You can also register aggregate functions that accumulate state across rows (like
+`SUM` or `GROUP_CONCAT`). An aggregate spec is a map with three keys:
+
+- `:init` — zero-arg function returning the initial accumulator for each group
+- `:step` — `(fn [acc & args])` called for each row, returns updated accumulator
+- `:final` — `(fn [acc])` called after all rows, returns the aggregate result
+
+```clojure
+(bridge/with-aggregate {:conn conn
+                        :func-name "clj_sum"
+                        :agg-spec {:init (constantly 0)
+                                   :step (fn [acc x] (+ acc (long x)))
+                                   :final identity}}
+  ;; SELECT clj_sum(amount) FROM sales;
+  ;; SELECT region, clj_sum(amount) FROM sales GROUP BY region;
+  )
+```
+
+For long-lived connections, use `add-aggregate!` to register and `remove-func!` to
+unregister. SQLite stores scalar and aggregate functions in the same namespace, so
+removal is always by name via `remove-func!`.
 
 ### Regexp (`com.latacora.sqlite.regexp`)
 

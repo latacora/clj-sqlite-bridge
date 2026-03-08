@@ -128,12 +128,19 @@
 (defn add-aggregate!
   "Adds a Clojure aggregate function to a SQLite connection.
 
-  agg-spec is a map with :step, :final, and :init — see ->Aggregate."
+  agg-spec is a map with :step, :final, and :init — see ->Aggregate.
+
+  To remove, call remove-func! with the same func-name. SQLite registers both
+  scalar and aggregate functions in the same namespace, so removal is by name."
   [^Connection conn func-name agg-spec]
   (Function/create conn func-name (->Aggregate agg-spec)))
 
 (defn remove-func!
-  "Removes a previously added SQLite user-defined function (scalar or aggregate)."
+  "Removes a previously added SQLite user-defined function by name.
+
+  Works for both scalar functions (registered via add-func!) and aggregate
+  functions (registered via add-aggregate!), since SQLite stores both in the
+  same function namespace keyed by name."
   [^Connection conn func-name]
   (Function/destroy conn func-name))
 
