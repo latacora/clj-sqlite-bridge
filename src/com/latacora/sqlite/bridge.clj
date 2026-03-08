@@ -2,11 +2,12 @@
   "Helpers for embedding Clojure into SQLite, providing functionality to add custom
   functions and listeners to SQLite."
   (:import
-   (org.sqlite Function SQLiteConnection SQLiteCommitListener SQLiteUpdateListener
-              SQLiteUpdateListener$Type)
+   (org.sqlite Function Function$Aggregate SQLiteConnection SQLiteCommitListener
+              SQLiteUpdateListener SQLiteUpdateListener$Type)
    (org.sqlite.core Codes)
    (java.lang.reflect Method)
-   (java.sql Connection)))
+   (java.sql Connection)
+   (java.util.concurrent ConcurrentHashMap)))
 
 (def ^:private func-methods
   (->> Function
@@ -71,7 +72,7 @@
         method (get-in func-methods [:result return-type])]
     (Method/.invoke method func (object-array [return-val]))))
 
-(defn ->Function
+(defn ^:private ->Function
   "Converts a Clojure function to a SQLite Function."
   [f]
   (proxy [Function] []
@@ -82,13 +83,57 @@
           (let [error-method (get func-methods :error)]
             (Method/.invoke error-method this (object-array [(str e)]))))))))
 
+(defn ^:private ->Aggregate
+  "Converts a map of Clojure functions to a SQLite Aggregate Function.
+
+  The map must contain:
+    :step  - (fn [acc & args]) called for each row, returns new accumulator
+    :final - (fn [acc]) called after all rows, returns the aggregate result
+    :init  - (fn []) called to create the initial accumulator for each group
+
+  Note: clone() is intentionally not overridden. SQLite calls Object.clone() to
+  create per-group instances, which preserves the native context pointer needed
+  for arg/result access. Per-group state is stored in an external
+  ConcurrentHashMap keyed by identity hash code."
+  [{:keys [step final init]}]
+  (let [^ConcurrentHashMap states (ConcurrentHashMap.)
+        get-state (fn [this]
+                    (.computeIfAbsent states (System/identityHashCode this)
+                                      (reify java.util.function.Function
+                                        (apply [_ _k] (atom (init))))))]
+    (proxy [Function$Aggregate] []
+      (xStep []
+        (try
+          (let [state (get-state this)
+                args (resolve-args! this)]
+            (swap! state #(apply step % args)))
+          (catch Exception e
+            (let [error-method (get func-methods :error)]
+              (Method/.invoke error-method this (object-array [(str e)]))))))
+      (xFinal []
+        (try
+          (let [state-atom (get-state this)
+                result (final @state-atom)]
+            (.remove states (System/identityHashCode this))
+            (return! this result))
+          (catch Exception e
+            (let [error-method (get func-methods :error)]
+              (Method/.invoke error-method this (object-array [(str e)])))))))))
+
 (defn add-func!
   "Adds a Clojure function as a SQLite user-defined function."
   [^Connection conn func-name f]
   (Function/create conn func-name (->Function f)))
 
+(defn add-aggregate!
+  "Adds a Clojure aggregate function to a SQLite connection.
+
+  agg-spec is a map with :step, :final, and :init — see ->Aggregate."
+  [^Connection conn func-name agg-spec]
+  (Function/create conn func-name (->Aggregate agg-spec)))
+
 (defn remove-func!
-  "Removes a previously added SQLite user-defined function."
+  "Removes a previously added SQLite user-defined function (scalar or aggregate)."
   [^Connection conn func-name]
   (Function/destroy conn func-name))
 
@@ -98,6 +143,16 @@
   [{:keys [conn func-name func]} & body]
   `(try
      (add-func! ~conn ~func-name ~func)
+     ~@body
+     (finally
+       (remove-func! ~conn ~func-name))))
+
+(defmacro with-aggregate
+  "Executes body with a SQLite aggregate function temporarily added to the
+  connection."
+  [{:keys [conn func-name agg-spec]} & body]
+  `(try
+     (add-aggregate! ~conn ~func-name ~agg-spec)
      ~@body
      (finally
        (remove-func! ~conn ~func-name))))
