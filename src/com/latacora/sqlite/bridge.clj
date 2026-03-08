@@ -98,10 +98,9 @@
   [{:keys [step final init]}]
   (let [states (atom {})
         get-state (fn [this]
-                    (or (get @states this)
-                        (let [s (atom (init))]
-                          (swap! states assoc this s)
-                          s)))]
+                    (-> states
+                        (swap! update this #(or % (atom (init))))
+                        (get this)))]
     (proxy [Function$Aggregate] []
       (xStep []
         (try
