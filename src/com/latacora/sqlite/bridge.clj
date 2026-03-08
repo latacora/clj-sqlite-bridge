@@ -2,8 +2,8 @@
   "Helpers for embedding Clojure into SQLite, providing functionality to add custom
   functions and listeners to SQLite."
   (:import
-   (org.sqlite Function Function$Aggregate SQLiteConnection SQLiteCommitListener
-              SQLiteUpdateListener SQLiteUpdateListener$Type)
+   (org.sqlite Function Function$Aggregate Function$Window SQLiteConnection
+              SQLiteCommitListener SQLiteUpdateListener SQLiteUpdateListener$Type)
    (org.sqlite.core Codes)
    (java.lang.reflect Method)
    (java.sql Connection)))
@@ -121,6 +121,61 @@
           (finally
             (swap! states dissoc this)))))))
 
+(defn ^:private ->Window
+  "Converts a map of Clojure functions to a SQLite Window Function.
+
+  The map must contain everything ->Aggregate requires, plus:
+    :inverse - (fn [acc & args]) called when a row leaves the window frame,
+               returns updated accumulator (undo a step)
+    :value   - (fn [acc]) called to get the current window value without
+               finalizing (like :final but mid-window)"
+  [{:keys [step final init inverse value]}]
+  (let [no-state (Object.)
+        states (atom {})]
+    (proxy [Function$Window] []
+      (xStep []
+        (try
+          (let [args (resolve-args! this)]
+            (swap! states
+                   (fn [m]
+                     (let [acc (get m this no-state)
+                           acc (if (identical? acc no-state) (init) acc)]
+                       (assoc m this (apply step acc args))))))
+          (catch Exception e
+            (let [error-method (get func-methods :error)]
+              (Method/.invoke error-method this (object-array [(str e)]))))))
+      (xFinal []
+        (try
+          (let [m @states
+                acc (get m this no-state)
+                result (final (if (identical? acc no-state) (init) acc))]
+            (return! this result))
+          (catch Exception e
+            (let [error-method (get func-methods :error)]
+              (Method/.invoke error-method this (object-array [(str e)]))))
+          (finally
+            (swap! states dissoc this))))
+      (xInverse []
+        (try
+          (let [args (resolve-args! this)]
+            (swap! states
+                   (fn [m]
+                     (let [acc (get m this no-state)
+                           acc (if (identical? acc no-state) (init) acc)]
+                       (assoc m this (apply inverse acc args))))))
+          (catch Exception e
+            (let [error-method (get func-methods :error)]
+              (Method/.invoke error-method this (object-array [(str e)]))))))
+      (xValue []
+        (try
+          (let [m @states
+                acc (get m this no-state)
+                result (value (if (identical? acc no-state) (init) acc))]
+            (return! this result))
+          (catch Exception e
+            (let [error-method (get func-methods :error)]
+              (Method/.invoke error-method this (object-array [(str e)])))))))))
+
 (defn add-func!
   "Adds a Clojure function as a SQLite user-defined function."
   [^Connection conn func-name f]
@@ -136,12 +191,23 @@
   [^Connection conn func-name agg-spec]
   (Function/create conn func-name (->Aggregate agg-spec)))
 
+(defn add-window!
+  "Adds a Clojure window function to a SQLite connection.
+
+  win-spec is a map with :step, :final, :init, :inverse, and :value —
+  see ->Window.
+
+  To remove, call remove-func! with the same func-name."
+  [^Connection conn func-name win-spec]
+  (Function/create conn func-name (->Window win-spec)))
+
 (defn remove-func!
   "Removes a previously added SQLite user-defined function by name.
 
-  Works for both scalar functions (registered via add-func!) and aggregate
-  functions (registered via add-aggregate!), since SQLite stores both in the
-  same function namespace keyed by name."
+  Works for scalar functions (registered via add-func!), aggregate functions
+  (registered via add-aggregate!), and window functions (registered via
+  add-window!), since SQLite stores all in the same function namespace keyed
+  by name."
   [^Connection conn func-name]
   (Function/destroy conn func-name))
 
@@ -161,6 +227,16 @@
   [{:keys [conn func-name agg-spec]} & body]
   `(try
      (add-aggregate! ~conn ~func-name ~agg-spec)
+     ~@body
+     (finally
+       (remove-func! ~conn ~func-name))))
+
+(defmacro with-window
+  "Executes body with a SQLite window function temporarily added to the
+  connection."
+  [{:keys [conn func-name win-spec]} & body]
+  `(try
+     (add-window! ~conn ~func-name ~win-spec)
      ~@body
      (finally
        (remove-func! ~conn ~func-name))))

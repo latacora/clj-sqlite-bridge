@@ -319,3 +319,76 @@
         (let [builtin (query-single conn "SELECT SUM(v) FROM nums" identity)
               custom (query-single conn "SELECT clj_sum(v) FROM nums" identity)]
           (= (long builtin) (long custom))))))))
+
+;; Window function tests
+
+(def ^:private clj-running-sum-spec
+  {:init    (constantly 0)
+   :step    (fn [acc x] (+ acc (long x)))
+   :final   identity
+   :inverse (fn [acc x] (- acc (long x)))
+   :value   identity})
+
+(deftest window-running-sum
+  (testing "window function computes running sum over ordered rows"
+    (with-conn
+     (fn [conn]
+       (exec! conn "CREATE TABLE nums (v INTEGER)")
+       (exec! conn "INSERT INTO nums VALUES (1), (2), (3), (4), (5)")
+       (bridge/with-window
+        {:conn conn :func-name "clj_rsum" :win-spec clj-running-sum-spec}
+        (let [rows (query-all conn
+                              "SELECT v, clj_rsum(v) OVER (ORDER BY v) FROM nums")]
+          (is (= [[1 1] [2 3] [3 6] [4 10] [5 15]] rows))))))))
+
+(deftest window-sliding-sum
+  (testing "sliding window with inverse removes exiting rows"
+    (with-conn
+     (fn [conn]
+       (exec! conn "CREATE TABLE nums (v INTEGER)")
+       (exec! conn "INSERT INTO nums VALUES (1), (2), (3), (4), (5)")
+       (bridge/with-window
+        {:conn conn :func-name "clj_rsum" :win-spec clj-running-sum-spec}
+        ;; 2-row sliding window: [1,2]=3 [2,3]=5 [3,4]=7 [4,5]=9
+        (let [rows (query-all conn
+                              "SELECT v, clj_rsum(v) OVER (ORDER BY v ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM nums")]
+          (is (= [[1 1] [2 3] [3 5] [4 7] [5 9]] rows))))))))
+
+(deftest window-partition-by
+  (testing "window function with PARTITION BY"
+    (with-conn
+     (fn [conn]
+       (exec! conn "CREATE TABLE sales (region TEXT, v INTEGER)")
+       (exec! conn "INSERT INTO sales VALUES ('a',1),('a',2),('a',3),('b',10),('b',20)")
+       (bridge/with-window
+        {:conn conn :func-name "clj_rsum" :win-spec clj-running-sum-spec}
+        (let [rows (query-all conn
+                              "SELECT region, v, clj_rsum(v) OVER (PARTITION BY region ORDER BY v) FROM sales")]
+          (is (= [["a" 1 1] ["a" 2 3] ["a" 3 6] ["b" 10 10] ["b" 20 30]] rows))))))))
+
+(deftest window-lifecycle
+  (testing "window function is removed after with-window"
+    (with-conn
+     (fn [conn]
+       (exec! conn "CREATE TABLE nums (v INTEGER)")
+       (exec! conn "INSERT INTO nums VALUES (1)")
+       (bridge/with-window
+        {:conn conn :func-name "clj_rsum" :win-spec clj-running-sum-spec}
+        (is (some? (query-all conn "SELECT clj_rsum(v) OVER () FROM nums"))))
+       (is (thrown? SQLException
+                    (query-all conn "SELECT clj_rsum(v) OVER () FROM nums")))))))
+
+(deftest window-matches-builtin-sum
+  (testing "window sum matches builtin SUM() OVER()"
+    (with-conn
+     (fn [conn]
+       (exec! conn "CREATE TABLE nums (v INTEGER)")
+       (exec! conn "INSERT INTO nums VALUES (10), (20), (30), (40), (50)")
+       (bridge/with-window
+        {:conn conn :func-name "clj_rsum" :win-spec clj-running-sum-spec}
+        (let [rows (query-all conn
+                              (str "SELECT v, "
+                                   "SUM(v) OVER (ORDER BY v), "
+                                   "clj_rsum(v) OVER (ORDER BY v) "
+                                   "FROM nums"))]
+          (is (every? (fn [[_ builtin custom]] (= builtin custom)) rows))))))))

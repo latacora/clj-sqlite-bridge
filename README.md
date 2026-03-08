@@ -57,6 +57,29 @@ For long-lived connections, use `add-aggregate!` to register and `remove-func!` 
 unregister. SQLite stores scalar and aggregate functions in the same namespace, so
 removal is always by name via `remove-func!`.
 
+### Window Functions
+
+Window functions extend aggregates with support for `OVER` clauses. A window spec
+adds two keys to the aggregate spec:
+
+- `:inverse` — `(fn [acc & args])` called when a row leaves the window frame (undo a step)
+- `:value` — `(fn [acc])` called to get the current value mid-window (like `:final` but without finishing)
+
+```clojure
+(bridge/with-window {:conn conn
+                     :func-name "clj_rsum"
+                     :win-spec {:init    (constantly 0)
+                                :step    (fn [acc x] (+ acc (long x)))
+                                :final   identity
+                                :inverse (fn [acc x] (- acc (long x)))
+                                :value   identity}}
+  ;; SELECT v, clj_rsum(v) OVER (ORDER BY v) FROM nums;
+  ;; SELECT v, clj_rsum(v) OVER (ORDER BY v ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) FROM nums;
+  )
+```
+
+For long-lived connections, use `add-window!` and `remove-func!`.
+
 ### Regexp (`com.latacora.sqlite.regexp`)
 
 SQLite supports a `REGEXP` operator but leaves the implementation undefined; this
