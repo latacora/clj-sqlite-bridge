@@ -268,6 +268,45 @@
       (is (thrown? SQLException
                    (query-single conn "SELECT bad_agg(v) FROM nums" identity)))))))
 
+(deftest aggregate-nil-accumulator
+  (testing "step returning nil is preserved, not re-initialized"
+    (with-conn
+     (fn [conn]
+       (exec! conn "CREATE TABLE flags (v INTEGER)")
+       (exec! conn "INSERT INTO flags VALUES (1), (2), (3)")
+       ;; init returns :fresh. First step sets acc to nil.
+       ;; If nil is confused with missing, second step would see :fresh again.
+       ;; final returns the number of times it saw :fresh — should be 0
+       ;; (only init produces :fresh, step should never see it after first row).
+       (let [fresh-count (atom 0)]
+         (bridge/with-aggregate
+          {:conn conn :func-name "nil_agg"
+           :agg-spec {:init (constantly :fresh)
+                      :step (fn [acc _x]
+                              (when (= acc :fresh)
+                                (swap! fresh-count inc))
+                              nil)
+                      :final (fn [_acc] @fresh-count)}}
+          ;; step sees :fresh once (from init), then nil on rows 2+.
+          ;; With the bug, step sees :fresh on every row (3 times).
+          (is (= 1 (query-single conn "SELECT nil_agg(v) FROM flags" identity)))))))))
+
+(deftest aggregate-init-not-called-in-final-when-state-exists
+  (testing "init is not called during xFinal when state already exists"
+    (with-conn
+     (fn [conn]
+       (exec! conn "CREATE TABLE t2 (v INTEGER)")
+       (exec! conn "INSERT INTO t2 VALUES (1)")
+       (let [init-calls (atom 0)]
+         (bridge/with-aggregate
+          {:conn conn :func-name "counting_init"
+           :agg-spec {:init (fn [] (swap! init-calls inc) 0)
+                      :step (fn [acc x] (+ acc (long x)))
+                      :final identity}}
+          (query-single conn "SELECT counting_init(v) FROM t2" identity))
+         ;; init should be called exactly once (for the one group), not twice
+         (is (= 1 @init-calls)))))))
+
 (defspec aggregate-sum-matches-builtin 50
   (prop/for-all [values (gen/not-empty (gen/vector gen/large-integer))]
     (with-conn

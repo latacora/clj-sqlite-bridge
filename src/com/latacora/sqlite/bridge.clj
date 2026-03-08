@@ -92,23 +92,29 @@
 
   Note: clone() is intentionally not overridden. SQLite calls Object.clone() to
   create per-group instances, which preserves the native context pointer needed
-  for arg/result access. Per-group state is stored in an external
-  ConcurrentHashMap keyed by the cloned instance itself (using default Object
-  identity semantics)."
+  for arg/result access. Per-group state is stored in an external atom keyed by
+  the cloned instance itself (using default Object identity semantics)."
   [{:keys [step final init]}]
-  (let [states (atom {})]
+  (let [no-state (Object.)
+        states (atom {})]
     (proxy [Function$Aggregate] []
       (xStep []
         (try
           (let [args (resolve-args! this)]
-            (swap! states update this
-                   (fn [acc] (apply step (if (some? acc) acc (init)) args))))
+            (swap! states
+                   (fn [m]
+                     (let [acc (get m this no-state)
+                           acc (if (identical? acc no-state) (init) acc)]
+                       (assoc m this (apply step acc args))))))
           (catch Exception e
             (let [error-method (get func-methods :error)]
               (Method/.invoke error-method this (object-array [(str e)]))))))
       (xFinal []
         (try
-          (->> (get @states this (init)) (final) (return! this))
+          (let [m @states
+                acc (get m this no-state)
+                result (final (if (identical? acc no-state) (init) acc))]
+            (return! this result))
           (catch Exception e
             (let [error-method (get func-methods :error)]
               (Method/.invoke error-method this (object-array [(str e)]))))
