@@ -94,11 +94,12 @@
   Note: clone() is intentionally not overridden. SQLite calls Object.clone() to
   create per-group instances, which preserves the native context pointer needed
   for arg/result access. Per-group state is stored in an external
-  ConcurrentHashMap keyed by identity hash code."
+  ConcurrentHashMap keyed by the cloned instance itself (using default Object
+  identity semantics)."
   [{:keys [step final init]}]
   (let [^ConcurrentHashMap states (ConcurrentHashMap.)
         get-state (fn [this]
-                    (.computeIfAbsent states (System/identityHashCode this)
+                    (.computeIfAbsent states this
                                       (reify java.util.function.Function
                                         (apply [_ _k] (atom (init))))))]
     (proxy [Function$Aggregate] []
@@ -114,11 +115,12 @@
         (try
           (let [state-atom (get-state this)
                 result (final @state-atom)]
-            (.remove states (System/identityHashCode this))
             (return! this result))
           (catch Exception e
             (let [error-method (get func-methods :error)]
-              (Method/.invoke error-method this (object-array [(str e)])))))))))
+              (Method/.invoke error-method this (object-array [(str e)]))))
+          (finally
+            (.remove states this)))))))
 
 (defn add-func!
   "Adds a Clojure function as a SQLite user-defined function."
