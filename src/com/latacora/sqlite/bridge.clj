@@ -97,23 +97,21 @@
   identity semantics)."
   [{:keys [step final init]}]
   (let [states (atom {})
-        get-state (fn [this]
-                    (-> states
-                        (swap! update this #(or % (atom (init))))
-                        (get this)))]
+        ensure-state (fn [this]
+                       (swap! states update this #(if (some? %) % (init))))]
     (proxy [Function$Aggregate] []
       (xStep []
         (try
-          (let [state (get-state this)
-                args (resolve-args! this)]
-            (swap! state #(apply step % args)))
+          (let [args (resolve-args! this)]
+            (ensure-state this)
+            (swap! states update this #(apply step % args)))
           (catch Exception e
             (let [error-method (get func-methods :error)]
               (Method/.invoke error-method this (object-array [(str e)]))))))
       (xFinal []
         (try
-          (let [state-atom (get-state this)
-                result (final @state-atom)]
+          (ensure-state this)
+          (let [result (final (get @states this))]
             (return! this result))
           (catch Exception e
             (let [error-method (get func-methods :error)]
