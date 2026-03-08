@@ -96,25 +96,19 @@
   ConcurrentHashMap keyed by the cloned instance itself (using default Object
   identity semantics)."
   [{:keys [step final init]}]
-  (let [states (atom {})
-        step-state! (fn [this args]
-                      (swap! states update this
-                             (fn [acc]
-                               (apply step (if (some? acc) acc (init)) args))))
-        final-state! (fn [this]
-                       (let [m @states]
-                         (final (get m this (init)))))]
+  (let [states (atom {})]
     (proxy [Function$Aggregate] []
       (xStep []
         (try
-          (step-state! this (resolve-args! this))
+          (let [args (resolve-args! this)]
+            (swap! states update this
+                   (fn [acc] (apply step (if (some? acc) acc (init)) args))))
           (catch Exception e
             (let [error-method (get func-methods :error)]
               (Method/.invoke error-method this (object-array [(str e)]))))))
       (xFinal []
         (try
-          (let [result (final-state! this)]
-            (return! this result))
+          (->> (get @states this (init)) (final) (return! this))
           (catch Exception e
             (let [error-method (get func-methods :error)]
               (Method/.invoke error-method this (object-array [(str e)]))))
