@@ -6,8 +6,7 @@
               SQLiteUpdateListener SQLiteUpdateListener$Type)
    (org.sqlite.core Codes)
    (java.lang.reflect Method)
-   (java.sql Connection)
-   (java.util.concurrent ConcurrentHashMap)))
+   (java.sql Connection)))
 
 (def ^:private func-methods
   (->> Function
@@ -97,11 +96,12 @@
   ConcurrentHashMap keyed by the cloned instance itself (using default Object
   identity semantics)."
   [{:keys [step final init]}]
-  (let [^ConcurrentHashMap states (ConcurrentHashMap.)
+  (let [states (atom {})
         get-state (fn [this]
-                    (.computeIfAbsent states this
-                                      (reify java.util.function.Function
-                                        (apply [_ _k] (atom (init))))))]
+                    (or (get @states this)
+                        (let [s (atom (init))]
+                          (swap! states assoc this s)
+                          s)))]
     (proxy [Function$Aggregate] []
       (xStep []
         (try
@@ -120,7 +120,7 @@
             (let [error-method (get func-methods :error)]
               (Method/.invoke error-method this (object-array [(str e)]))))
           (finally
-            (.remove states this)))))))
+            (swap! states dissoc this)))))))
 
 (defn add-func!
   "Adds a Clojure function as a SQLite user-defined function."
