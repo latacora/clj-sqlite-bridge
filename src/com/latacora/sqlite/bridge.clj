@@ -390,8 +390,11 @@
   SQLite encounters a locked database. Return truthy to retry, falsey to abort
   with SQLITE_BUSY.
 
-  Only one busy handler can be active per connection; setting a new one replaces
-  the previous."
+  The handler may sleep (e.g. for backoff) and may consult other application
+  state (e.g. current load, queue depth) to decide whether retrying is
+  appropriate. However, it must not use the database connection that invoked it.
+
+  Setting a new handler replaces any previously set handler on the connection."
   [^Connection conn f]
   (BusyHandler/setHandler conn
                           (proxy [BusyHandler] []
