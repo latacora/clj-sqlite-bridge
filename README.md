@@ -172,10 +172,13 @@ SQLite returns `SQLITE_BUSY` when a connection tries to write while another hold
 the lock. A busy handler lets you control retry behavior:
 
 ```clojure
-(bridge/with-busy-handler {:conn conn
-                           :handler (fn [retry-count]
-                                      ;; Return truthy to retry, falsey to abort
-                                      (< retry-count 10))}
+(bridge/with-busy-handler
+ {:conn conn
+  :handler (fn [retry-count]
+             ;; Exponential backoff: sleep longer as contention persists
+             (when (< retry-count 10)
+               (Thread/sleep (min 1000 (* 10 (bit-shift-left 1 retry-count))))
+               true))}
   ;; Queries that may encounter lock contention
   )
 ```
