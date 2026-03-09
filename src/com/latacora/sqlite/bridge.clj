@@ -2,8 +2,9 @@
   "Helpers for embedding Clojure into SQLite, providing functionality to add custom
   functions and listeners to SQLite."
   (:import
-   (org.sqlite Function Function$Aggregate Function$Window SQLiteConnection
-              SQLiteCommitListener SQLiteUpdateListener SQLiteUpdateListener$Type)
+   (org.sqlite BusyHandler Function Function$Aggregate Function$Window
+              SQLiteConnection SQLiteCommitListener SQLiteUpdateListener
+              SQLiteUpdateListener$Type)
    (org.sqlite.core Codes)
    (java.lang.reflect Method)
    (java.sql Connection)))
@@ -381,3 +382,32 @@
        ~@body
        (finally
          (deregister#)))))
+
+;; Busy handler
+
+(defn set-busy-handler!
+  "Sets a busy handler on the connection. f is called with (retry-count) when
+  SQLite encounters a locked database. Return truthy to retry, falsey to abort
+  with SQLITE_BUSY.
+
+  Only one busy handler can be active per connection; setting a new one replaces
+  the previous."
+  [^Connection conn f]
+  (BusyHandler/setHandler conn
+                          (proxy [BusyHandler] []
+                            (callback [retry-count]
+                              (if (f retry-count) 1 0)))))
+
+(defn clear-busy-handler!
+  "Removes the busy handler from the connection, reverting to default behavior."
+  [^Connection conn]
+  (BusyHandler/clearHandler conn))
+
+(defmacro with-busy-handler
+  "Executes body with a busy handler set on the connection for the duration."
+  [{:keys [conn handler]} & body]
+  `(try
+     (set-busy-handler! ~conn ~handler)
+     ~@body
+     (finally
+       (clear-busy-handler! ~conn))))

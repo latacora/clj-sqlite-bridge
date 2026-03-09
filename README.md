@@ -166,6 +166,23 @@ string comparisons when data arrives in mixed normalization forms:
   )
 ```
 
+### Busy Handler
+
+SQLite returns `SQLITE_BUSY` when a connection tries to write while another holds
+the lock. A busy handler lets you control retry behavior:
+
+```clojure
+(bridge/with-busy-handler {:conn conn
+                           :handler (fn [retry-count]
+                                      ;; Return truthy to retry, falsey to abort
+                                      (< retry-count 10))}
+  ;; Queries that may encounter lock contention
+  )
+```
+
+Only one busy handler can be active per connection. For long-lived connections,
+use `set-busy-handler!` and `clear-busy-handler!`.
+
 ## Development
 
 Use babashka as the entry point for project tasks:
