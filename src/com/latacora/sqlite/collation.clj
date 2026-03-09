@@ -28,8 +28,10 @@
 (defmacro with-collation
   "Executes body with a SQLite collation temporarily registered on the connection."
   [{:keys [conn collation-name comparator]} & body]
-  `(try
-     (add-collation! ~conn ~collation-name ~comparator)
-     ~@body
-     (finally
-       (remove-collation! ~conn ~collation-name))))
+  `(let [conn# ~conn
+         name# ~collation-name]
+     (try
+       (add-collation! conn# name# ~comparator)
+       ~@body
+       (finally
+         (remove-collation! conn# name#)))))

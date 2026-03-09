@@ -216,31 +216,37 @@
   "Executes body with a SQLite user-defined function temporarily added to the
   connection."
   [{:keys [conn func-name func]} & body]
-  `(try
-     (add-func! ~conn ~func-name ~func)
-     ~@body
-     (finally
-       (remove-func! ~conn ~func-name))))
+  `(let [conn# ~conn
+         func-name# ~func-name]
+     (try
+       (add-func! conn# func-name# ~func)
+       ~@body
+       (finally
+         (remove-func! conn# func-name#)))))
 
 (defmacro with-aggregate
   "Executes body with a SQLite aggregate function temporarily added to the
   connection."
   [{:keys [conn func-name agg-spec]} & body]
-  `(try
-     (add-aggregate! ~conn ~func-name ~agg-spec)
-     ~@body
-     (finally
-       (remove-func! ~conn ~func-name))))
+  `(let [conn# ~conn
+         func-name# ~func-name]
+     (try
+       (add-aggregate! conn# func-name# ~agg-spec)
+       ~@body
+       (finally
+         (remove-func! conn# func-name#)))))
 
 (defmacro with-window
   "Executes body with a SQLite window function temporarily added to the
   connection."
   [{:keys [conn func-name win-spec]} & body]
-  `(try
-     (add-window! ~conn ~func-name ~win-spec)
-     ~@body
-     (finally
-       (remove-func! ~conn ~func-name))))
+  `(let [conn# ~conn
+         func-name# ~func-name]
+     (try
+       (add-window! conn# func-name# ~win-spec)
+       ~@body
+       (finally
+         (remove-func! conn# func-name#)))))
 
 ;; Listener support
 
@@ -409,8 +415,9 @@
 (defmacro with-busy-handler
   "Executes body with a busy handler set on the connection for the duration."
   [{:keys [conn handler]} & body]
-  `(try
-     (set-busy-handler! ~conn ~handler)
-     ~@body
-     (finally
-       (clear-busy-handler! ~conn))))
+  `(let [conn# ~conn]
+     (try
+       (set-busy-handler! conn# ~handler)
+       ~@body
+       (finally
+         (clear-busy-handler! conn#)))))
