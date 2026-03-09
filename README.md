@@ -80,6 +80,35 @@ adds two keys to the aggregate spec:
 
 For long-lived connections, use `add-window!` and `remove-func!`.
 
+### Custom Collations (`com.latacora.sqlite.collation`)
+
+Collations define how strings are compared for `ORDER BY`, `=`, `DISTINCT`, and
+`GROUP BY`. Unlike UDFs which must be called explicitly, a collation registered on a
+column permeates all operations automatically.
+
+```clojure
+(require '[com.latacora.sqlite.collation :as collation])
+
+(collation/with-collation {:conn conn
+                           :collation-name "reverse"
+                           :comparator (fn [a b] (compare b a))}
+  ;; SELECT name FROM t ORDER BY name COLLATE reverse;
+  )
+```
+
+For long-lived connections, use `add-collation!` and `remove-collation!`.
+
+The `strings` namespace ships a ready-made `unicode_ci` collation that combines
+casefolding and NFC normalization:
+
+```clojure
+(strings/with-unicode-ci {:conn conn}
+  ;; Case-insensitive, NFC-normalized comparisons:
+  ;; SELECT DISTINCT name FROM t;  -- 'Ångström' = 'ångström' = 'ÅNGSTRÖM'
+  ;; SELECT name FROM t ORDER BY name COLLATE unicode_ci;
+  )
+```
+
 ### Regexp (`com.latacora.sqlite.regexp`)
 
 SQLite supports a `REGEXP` operator but leaves the implementation undefined; this

@@ -19,6 +19,21 @@
       (when (.next rs)
         (.getObject rs 1)))))
 
+(defn ^:private exec!
+  [^Connection conn sql]
+  (with-open [stmt (.createStatement conn)]
+    (.execute stmt sql)))
+
+(defn ^:private query-all
+  [^Connection conn sql]
+  (with-open [stmt (.createStatement conn)
+              rs (.executeQuery stmt sql)]
+    (let [cols (.getColumnCount (.getMetaData rs))]
+      (loop [rows []]
+        (if (.next rs)
+          (recur (conj rows (mapv #(.getObject rs (inc %)) (range cols))))
+          rows)))))
+
 (deftest casefold-behavior
   (testing "pure function"
     (is (= "ångström" (strings/casefold "Ångström")))
@@ -48,3 +63,45 @@
                   (query-single conn "SELECT normalize_nfc(?);" #(.setString % 1 nfd))))
            (is (= nfc
                   (query-single conn "SELECT normalize_nfc(?);" #(.setString % 1 nfc))))))))))
+
+;; unicode_ci collation tests
+
+(deftest unicode-ci-compare-behavior
+  (testing "pure function"
+    (is (zero? (strings/unicode-ci-compare "Ångström" "ångström")))
+    (is (zero? (strings/unicode-ci-compare "Straße" "straße")))
+    (is (zero? (strings/unicode-ci-compare "e\u0301" "é")))
+    (is (neg? (strings/unicode-ci-compare "a" "b")))
+    (is (pos? (strings/unicode-ci-compare "b" "a")))))
+
+(deftest unicode-ci-order-by
+  (testing "ORDER BY with unicode_ci collation"
+    (with-conn
+     (fn [conn]
+       (strings/with-unicode-ci {:conn conn}
+         (exec! conn "CREATE TABLE t (name TEXT)")
+         (exec! conn "INSERT INTO t VALUES ('Ångström'), ('apple'), ('Banana')")
+         (let [rows (query-all conn "SELECT name FROM t ORDER BY name COLLATE unicode_ci")]
+           ;; After casefold+NFC: "apple" < "banana" < "ångström" (å = U+00E5, after z)
+           (is (= [["apple"] ["Banana"] ["Ångström"]] rows))))))))
+
+(deftest unicode-ci-equality
+  (testing "case-insensitive equality via collation"
+    (with-conn
+     (fn [conn]
+       (strings/with-unicode-ci {:conn conn}
+         (exec! conn "CREATE TABLE t (name TEXT COLLATE unicode_ci)")
+         (exec! conn "INSERT INTO t VALUES ('Ångström'), ('ångström'), ('ÅNGSTRÖM')")
+         (let [rows (query-all conn "SELECT DISTINCT name FROM t")]
+           (is (= 1 (count rows)))))))))
+
+(deftest unicode-ci-nfc-normalization
+  (testing "NFC-equivalent strings are equal under unicode_ci"
+    (with-conn
+     (fn [conn]
+       (strings/with-unicode-ci {:conn conn}
+         (exec! conn "CREATE TABLE t (name TEXT COLLATE unicode_ci)")
+         ;; e + combining acute (NFD) vs precomposed é (NFC)
+         (exec! conn "INSERT INTO t VALUES ('e' || char(769)), ('é')")
+         (let [rows (query-all conn "SELECT DISTINCT name FROM t")]
+           (is (= 1 (count rows)))))))))
