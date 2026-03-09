@@ -6,7 +6,7 @@
    [com.latacora.sqlite.bridge :as bridge])
   (:import
    (java.sql DriverManager Connection)
-   (java.util.concurrent CountDownLatch Executors Future)))
+   (java.util.concurrent Callable CountDownLatch Executors Future)))
 
 (defn ^:private with-conn
   [f]
