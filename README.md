@@ -103,9 +103,13 @@ casefolding and NFC normalization:
 
 ```clojure
 (strings/with-unicode-ci {:conn conn}
-  ;; Case-insensitive, NFC-normalized comparisons:
+  ;; Specify on a column:
+  ;; CREATE TABLE t (name TEXT COLLATE unicode_ci);
   ;; SELECT DISTINCT name FROM t;  -- 'Ångström' = 'ångström' = 'ÅNGSTRÖM'
+  ;;
+  ;; Or per-query:
   ;; SELECT name FROM t ORDER BY name COLLATE unicode_ci;
+  ;; SELECT * FROM t WHERE name = 'ångström' COLLATE unicode_ci;
   )
 ```
 
