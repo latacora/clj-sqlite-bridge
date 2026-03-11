@@ -2,8 +2,9 @@
   "Helpers for embedding Clojure into SQLite, providing functionality to add custom
   functions and listeners to SQLite."
   (:import
-   (org.sqlite Function Function$Aggregate Function$Window SQLiteConnection
-              SQLiteCommitListener SQLiteUpdateListener SQLiteUpdateListener$Type)
+   (org.sqlite BusyHandler Function Function$Aggregate Function$Window
+              SQLiteConnection SQLiteCommitListener SQLiteUpdateListener
+              SQLiteUpdateListener$Type)
    (org.sqlite.core Codes)
    (java.lang.reflect Method)
    (java.sql Connection)))
@@ -215,31 +216,37 @@
   "Executes body with a SQLite user-defined function temporarily added to the
   connection."
   [{:keys [conn func-name func]} & body]
-  `(try
-     (add-func! ~conn ~func-name ~func)
-     ~@body
-     (finally
-       (remove-func! ~conn ~func-name))))
+  `(let [conn# ~conn
+         func-name# ~func-name]
+     (try
+       (add-func! conn# func-name# ~func)
+       ~@body
+       (finally
+         (remove-func! conn# func-name#)))))
 
 (defmacro with-aggregate
   "Executes body with a SQLite aggregate function temporarily added to the
   connection."
   [{:keys [conn func-name agg-spec]} & body]
-  `(try
-     (add-aggregate! ~conn ~func-name ~agg-spec)
-     ~@body
-     (finally
-       (remove-func! ~conn ~func-name))))
+  `(let [conn# ~conn
+         func-name# ~func-name]
+     (try
+       (add-aggregate! conn# func-name# ~agg-spec)
+       ~@body
+       (finally
+         (remove-func! conn# func-name#)))))
 
 (defmacro with-window
   "Executes body with a SQLite window function temporarily added to the
   connection."
   [{:keys [conn func-name win-spec]} & body]
-  `(try
-     (add-window! ~conn ~func-name ~win-spec)
-     ~@body
-     (finally
-       (remove-func! ~conn ~func-name))))
+  `(let [conn# ~conn
+         func-name# ~func-name]
+     (try
+       (add-window! conn# func-name# ~win-spec)
+       ~@body
+       (finally
+         (remove-func! conn# func-name#)))))
 
 ;; Listener support
 
@@ -381,3 +388,36 @@
        ~@body
        (finally
          (deregister#)))))
+
+;; Busy handler
+
+(defn set-busy-handler!
+  "Sets a busy handler on the connection. f is called with (retry-count) when
+  SQLite encounters a locked database. Return truthy to retry, falsey to abort
+  with SQLITE_BUSY.
+
+  The handler may sleep (e.g. for backoff) and may consult other application
+  state (e.g. current load, queue depth) to decide whether retrying is
+  appropriate. However, it must not use the database connection that invoked it.
+
+  Setting a new handler replaces any previously set handler on the connection."
+  [^Connection conn f]
+  (BusyHandler/setHandler conn
+                          (proxy [BusyHandler] []
+                            (callback [retry-count]
+                              (if (f retry-count) 1 0)))))
+
+(defn clear-busy-handler!
+  "Removes the busy handler from the connection, reverting to default behavior."
+  [^Connection conn]
+  (BusyHandler/clearHandler conn))
+
+(defmacro with-busy-handler
+  "Executes body with a busy handler set on the connection for the duration."
+  [{:keys [conn handler]} & body]
+  `(let [conn# ~conn]
+     (try
+       (set-busy-handler! conn# ~handler)
+       ~@body
+       (finally
+         (clear-busy-handler! conn#)))))
