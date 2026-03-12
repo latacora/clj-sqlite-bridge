@@ -3,8 +3,8 @@
   functions and listeners to SQLite."
   (:import
    (org.sqlite BusyHandler Function Function$Aggregate Function$Window
-              SQLiteConnection SQLiteCommitListener SQLiteUpdateListener
-              SQLiteUpdateListener$Type)
+              ProgressHandler SQLiteConnection SQLiteCommitListener
+              SQLiteUpdateListener SQLiteUpdateListener$Type)
    (org.sqlite.core Codes)
    (java.lang.reflect Method)
    (java.sql Connection)))
@@ -421,3 +421,35 @@
        ~@body
        (finally
          (clear-busy-handler! conn#)))))
+
+;; Progress handler
+
+(defn set-progress-handler!
+  "Sets a progress handler on the connection. f is a zero-arg function called
+  every n SQLite virtual machine instructions. Return truthy to interrupt the
+  running query (SQLite returns SQLITE_INTERRUPT), falsey to continue.
+
+  Useful for implementing query timeouts or cancellation from another thread.
+  The handler must not use the database connection that invoked it.
+
+  Setting a new handler replaces any previously set handler on the connection."
+  [^Connection conn n f]
+  (ProgressHandler/setHandler conn (int n)
+                              (proxy [ProgressHandler] []
+                                (progress []
+                                  (if (f) 1 0)))))
+
+(defn clear-progress-handler!
+  "Removes the progress handler from the connection."
+  [^Connection conn]
+  (ProgressHandler/clearHandler conn))
+
+(defmacro with-progress-handler
+  "Executes body with a progress handler set on the connection for the duration."
+  [{:keys [conn n handler]} & body]
+  `(let [conn# ~conn]
+     (try
+       (set-progress-handler! conn# ~n ~handler)
+       ~@body
+       (finally
+         (clear-progress-handler! conn#)))))
