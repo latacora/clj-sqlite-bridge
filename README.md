@@ -252,6 +252,25 @@ Online Backup API. Supports progress callbacks and incremental (stepped) copies.
 Both functions accept optional keyword arguments: `:db-name` (default `"main"`),
 `:progress`, `:pages`, `:sleep-ms`, and `:retries`.
 
+### Serialize and Deserialize (`com.latacora.sqlite.serialization`)
+
+Serialize an entire SQLite database to a byte array, or restore one from bytes.
+Useful for snapshotting in-memory databases, transmitting database state over the
+network, or embedding database contents in other data structures.
+
+```clojure
+(require '[com.latacora.sqlite.serialization :as ser])
+
+;; Snapshot a database to bytes
+(let [data (ser/serialize conn)]
+  ;; ... store, transmit, etc. ...
+
+  ;; Restore into another connection (replaces its contents)
+  (ser/deserialize! conn2 data))
+```
+
+Both functions accept an optional `db-name` argument (default `"main"`).
+
 ## Development
 
 Use babashka as the entry point for project tasks:
