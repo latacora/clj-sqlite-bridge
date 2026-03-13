@@ -228,6 +228,30 @@ Available limit keywords: `:length`, `:sql-length`, `:column`, `:expr-depth`,
 `:like-pattern-length`, `:variable-number`, `:trigger-depth`,
 `:worker-threads`, `:page-count`.
 
+### Backup and Restore (`com.latacora.sqlite.backup`)
+
+Back up a live SQLite database to a file, or restore from one, using SQLite's
+Online Backup API. Supports progress callbacks and incremental (stepped) copies.
+
+```clojure
+(require '[com.latacora.sqlite.backup :as backup])
+
+;; Back up an in-memory database to a file
+(backup/backup! conn "/tmp/mydb.bak")
+
+;; Restore from a file into a connection
+(backup/restore! conn "/tmp/mydb.bak")
+
+;; With progress reporting and stepped copy
+(backup/backup! conn "/tmp/mydb.bak"
+  :pages 100
+  :progress (fn [remaining total]
+              (println (str remaining "/" total " pages remaining"))))
+```
+
+Both functions accept optional keyword arguments: `:db-name` (default `"main"`),
+`:progress`, `:pages`, `:sleep-ms`, and `:retries`.
+
 ## Development
 
 Use babashka as the entry point for project tasks:
