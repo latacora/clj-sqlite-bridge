@@ -48,7 +48,13 @@
 (defn set-limit!
   "Sets a SQLite limit and returns the previous value.
 
+  value must be a non-negative integer that fits in a 32-bit int.
   See get-limit for valid limit-kw values."
   [^Connection conn limit-kw value]
+  (when-not (and (integer? value)
+                 (<= 0 value Integer/MAX_VALUE))
+    (throw (IllegalArgumentException.
+            (str "Limit value must be a non-negative integer <= "
+                 Integer/MAX_VALUE ", got: " value))))
   (let [db (.getDatabase (->sqlite-conn conn))]
     (.limit db (limit-ordinal limit-kw) (int value))))

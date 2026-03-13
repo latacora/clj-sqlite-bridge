@@ -64,3 +64,22 @@
      (fn [conn]
        (is (thrown? IllegalArgumentException
                     (limits/get-limit conn :nonexistent)))))))
+
+(deftest set-limit-validates-value
+  (testing "negative values are rejected"
+    (with-conn
+     (fn [conn]
+       (is (thrown? IllegalArgumentException
+                    (limits/set-limit! conn :column -1))))))
+
+  (testing "values above Integer/MAX_VALUE are rejected"
+    (with-conn
+     (fn [conn]
+       (is (thrown? IllegalArgumentException
+                    (limits/set-limit! conn :column (inc Integer/MAX_VALUE)))))))
+
+  (testing "non-integer values are rejected"
+    (with-conn
+     (fn [conn]
+       (is (thrown? IllegalArgumentException
+                    (limits/set-limit! conn :column 3.14)))))))
