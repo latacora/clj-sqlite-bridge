@@ -115,3 +115,17 @@
                                      (swap! calls conj [remaining total])))
          ;; With pages=1, there should be multiple progress calls
          (is (> (count @calls) 1)))))))
+
+(deftest backup-validates-numeric-options
+  (testing "overflow values are rejected"
+    (with-mem-conn
+     (fn [conn]
+       (is (thrown? IllegalArgumentException
+                    (backup/backup! conn (.getAbsolutePath backup-file)
+                                    :pages (inc Integer/MAX_VALUE))))
+       (is (thrown? IllegalArgumentException
+                    (backup/backup! conn (.getAbsolutePath backup-file)
+                                    :sleep-ms (inc Integer/MAX_VALUE))))
+       (is (thrown? IllegalArgumentException
+                    (backup/restore! conn (.getAbsolutePath backup-file)
+                                     :retries 3.14)))))))

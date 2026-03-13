@@ -16,6 +16,14 @@
       (progress [_ remaining total]
         (f remaining total)))))
 
+(defn ^:private check-int
+  "Validates that v is an integer in 32-bit int range. label is for error messages."
+  [label v]
+  (when-not (and (integer? v)
+                 (<= Integer/MIN_VALUE v Integer/MAX_VALUE))
+    (throw (IllegalArgumentException.
+            (str label " must be an integer in int range, got: " v)))))
+
 (defn backup!
   "Backs up a SQLite database to a file.
 
@@ -33,6 +41,9 @@
                                        pages -1
                                        sleep-ms 0
                                        retries 1}}]
+  (check-int ":pages" pages)
+  (check-int ":sleep-ms" sleep-ms)
+  (check-int ":retries" retries)
   (let [db (->db conn)
         observer (->observer progress)]
     (.backup db db-name (str dest-file) observer (int pages) (int sleep-ms) (int retries))))
@@ -54,6 +65,9 @@
                                       pages -1
                                       sleep-ms 0
                                       retries 1}}]
+  (check-int ":pages" pages)
+  (check-int ":sleep-ms" sleep-ms)
+  (check-int ":retries" retries)
   (let [db (->db conn)
         observer (->observer progress)]
     (.restore db db-name (str src-file) observer (int pages) (int sleep-ms) (int retries))))
