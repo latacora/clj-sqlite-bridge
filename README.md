@@ -186,6 +186,24 @@ the lock. A busy handler lets you control retry behavior:
 Only one busy handler can be active per connection. For long-lived connections,
 use `set-busy-handler!` and `clear-busy-handler!`.
 
+### Progress Handler
+
+A progress handler is called periodically during long-running queries, every N
+virtual machine instructions. Return truthy to interrupt the query (SQLite returns
+`SQLITE_INTERRUPT`), falsey to continue.
+
+```clojure
+(let [cancelled (atom false)]
+  (bridge/with-progress-handler
+   {:conn conn :n 1000
+    :handler (fn [] @cancelled)}
+    ;; Long-running query...
+    ;; From another thread: (reset! cancelled true)
+    ))
+```
+
+For long-lived connections, use `set-progress-handler!` and `clear-progress-handler!`.
+
 ## Development
 
 Use babashka as the entry point for project tasks:
