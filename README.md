@@ -204,6 +204,30 @@ virtual machine instructions. Return truthy to interrupt the query (SQLite retur
 
 For long-lived connections, use `set-progress-handler!` and `clear-progress-handler!`.
 
+### SQLite Limits (`com.latacora.sqlite.limits`)
+
+SQLite has per-connection runtime limits that cap things like maximum SQL length,
+column count, expression depth, and more. You can query or tighten these limits
+at runtime without recompiling.
+
+```clojure
+(require '[com.latacora.sqlite.limits :as limits])
+
+(with-open [conn (DriverManager/getConnection "jdbc:sqlite::memory:")]
+  ;; Query the current limit
+  (limits/get-limit conn :sql-length)        ;=> 1000000000
+
+  ;; Tighten a limit (returns the previous value)
+  (limits/set-limit! conn :sql-length 10000) ;=> 1000000000
+  (limits/get-limit conn :sql-length)        ;=> 10000
+  )
+```
+
+Available limit keywords: `:length`, `:sql-length`, `:column`, `:expr-depth`,
+`:compound-select`, `:vdbe-op`, `:function-arg`, `:attached`,
+`:like-pattern-length`, `:variable-number`, `:trigger-depth`,
+`:worker-threads`, `:page-count`.
+
 ## Development
 
 Use babashka as the entry point for project tasks:
